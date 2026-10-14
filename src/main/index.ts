@@ -9,6 +9,7 @@ import {
   net,
 } from "electron";
 import { join, basename } from "path";
+import { initializeProviderProfiles } from "./settings/bootstrap";
 import { SecretVault } from "./settings/vault";
 import { TurnTrace } from "./diagnostics/turn-trace";
 import { asyncCrypto } from "./settings/async-crypto";
@@ -17,6 +18,7 @@ import {
   type ModelRequestOptions,
   type ModelStreamHandlers,
 } from "./providers/model/client";
+import { createModelRouter } from "./providers/model/router";
 import { CodexModelClient } from "./providers/model/codex";
 import { RequestSlot } from "./runtime/request-slot";
 import { registerIpcMainHandlers, rendererOrigins } from "./ipc/register";
@@ -179,57 +181,20 @@ app.whenReady().then(async () => {
   windowManager.setOpacity(extras.opacity);
   const vaultPath = join(app.getPath("userData"), "secrets.vault");
   // Chromium follows the macOS system proxy; Node fetch does not.
-  const profiles = new ProviderProfiles(
+  const { profiles, aliases } = await initializeProviderProfiles(
     join(app.getPath("userData"), "provider-profiles.json"),
+    {
+      answerProvider: extras.answerProvider ?? "api",
+      model: modelSettings,
+      asr: extras.asr,
+      codex: extras.codex,
+      realtime: extras.realtime,
+    },
   );
-  await profiles.initialize({
-    answerProvider: extras.answerProvider ?? "api",
-    model: modelSettings,
-    asr: extras.asr,
-    codex: extras.codex,
-    realtime: extras.realtime,
-  });
   const profileKey = (
     kind: "model" | "asr" | "realtime",
     id = profiles.snapshot().activeId,
   ) => `provider:${id}:${kind}`;
-  // Migrate old encrypted keys once; keep legacy entries for rollback to older packages.
-  const initialProfile = profiles.active();
-  if (
-    profiles.migrated &&
-    profiles.snapshot().profiles.length === 1 &&
-    initialProfile.answerProvider !== "realtime"
-  ) {
-    const realtime = await profiles.upsert({
-      name: "实时问答",
-      answerProvider: "realtime",
-      model: modelSettings,
-      realtime: {
-        workspaceId: "",
-        region: "cn-beijing",
-        modelName: "qwen3.8-omni-flash-realtime",
-      },
-    });
-  }
-  if (!profiles.snapshot().profiles.some((p) => p.answerProvider === "codex"))
-    await profiles.upsert({
-      name: "GPT-6.1-Sol",
-      answerProvider: "codex",
-      codex: { modelName: "gpt-6.1-sol", effort: "low" },
-    });
-  const aliases: Record<string, string> = {};
-  const primary = profiles.snapshot().profiles[0];
-  for (const kind of ["model", "asr"] as const)
-    aliases[profileKey(kind, primary.id)] = kind + "_key";
-  const legacyRealtime = profiles
-    .snapshot()
-    .profiles.find(
-      (p) => p.name === "实时问答" && p.answerProvider === "realtime",
-    );
-  if (legacyRealtime) {
-    aliases[profileKey("realtime", legacyRealtime.id)] = "asr_key";
-    aliases[profileKey("model", legacyRealtime.id)] = "model_key";
-  }
   vault = new SecretVault({
     storagePath: vaultPath,
     cryptoEngine: asyncCrypto(safeStorage),
@@ -270,75 +235,13 @@ app.whenReady().then(async () => {
     join(app.getPath("userData"), "codex-translation"),
   );
   const realtimeChannels = new Map<string, QwenRealtime>();
-  const routeModel = async (
-    options: ModelRequestOptions & { realtimeAudio?: boolean },
-    handlers: ModelStreamHandlers,
-    translation = false,
-  ) => {
-    if (extras.answerProvider === "codex")
-      return (translation ? codexTranslation : codexClient).streamChat(
-        {
-          ...options,
-          modelName: extras.codex?.modelName ?? "",
-          codexEffort: extras.codex?.effort ?? "",
-        },
-        handlers,
-      );
-    if (
-      extras.answerProvider !== "realtime" ||
-      options.messages.some((m) => Array.isArray(m.content))
-    )
-      return modelClient.streamChat(options, handlers);
-    if (options.realtimeAudio) {
-      const channel = realtimeChannels.get("system");
-      if (!channel) {
-        handlers.onError?.(Error("实时音频未连接"), {
-          requestId: options.requestId,
-          generation: options.generation,
-        });
-        return;
-      }
-      return channel.respond(
-        {
-          messages: options.messages,
-          audio: true,
-          signal: options.signal,
-          requestId: options.requestId,
-          generation: options.generation,
-        },
-        handlers,
-      );
-    }
-    const config = extras.realtime;
-    if (!config?.workspaceId) {
-      handlers.onError?.(Error("请填写实时方案的业务空间 ID"), {
-        requestId: options.requestId,
-        generation: options.generation,
-      });
-      return;
-    }
-    const client = new QwenRealtime(
-      {
-        endpoint: realtimeEndpoint(config),
-        modelName: config.modelName,
-        apiKey: options.apiKey ?? "",
-      },
-      () => {},
-      () => {},
-      () => {},
-    );
-    try {
-      await client.connect();
-      await client.respond(options, handlers);
-    } catch (e) {
-      handlers.onError?.(e instanceof Error ? e : Error("REALTIME_FAILED"), {
-        requestId: options.requestId,
-        generation: options.generation,
-      });
-    } finally {
-      client.close();
-    }
-  };
+  const routeModel = createModelRouter({
+    getSettings: () => extras,
+    api: modelClient,
+    codex: codexClient,
+    translation: codexTranslation,
+    channel: () => realtimeChannels.get("system"),
+  });
 
   let realtimeReady = false;
   const recovery = new RealtimeRecovery();
