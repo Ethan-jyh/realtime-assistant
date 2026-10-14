@@ -118,6 +118,9 @@ export class SecretVault {
       return "unknown";
     }
   }
+  async verifyAccess(): Promise<void> {
+    await this.bounded(() => this.readPersisted());
+  }
   async hasKey(keyId: string): Promise<boolean> {
     return (await this.getKey(keyId)) !== null;
   }
@@ -167,6 +170,15 @@ export class SecretVault {
     const path = this.options.storagePath,
       temp = path + ".tmp." + Date.now();
     await this.fs.mkdir(dirname(path));
+    if (
+      (await this.fs.exists(path)) &&
+      !(await this.fs.exists(path + ".before-async"))
+    ) {
+      await this.fs.writeFile(temp + ".backup", await this.fs.readFile(path), {
+        mode: 0o600,
+      });
+      await this.fs.rename(temp + ".backup", path + ".before-async");
+    }
     await this.fs.writeFile(temp, encrypted, { mode: 0o600 });
     await this.fs.rename(temp, path);
     // Remove old metadata before installing the new advisory index; interruption yields unknown.

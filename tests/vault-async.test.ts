@@ -103,3 +103,19 @@ test("timed out save never writes late output and retains only explicitly entere
   expect(files.get("/vault")!.toString()).toBe("old-cipher");
   expect(await vault.getKey("new")).toBe("entered");
 });
+
+test("first async save preserves the original encrypted file for rollback across later saves", async () => {
+  const { vault, files } = fixture(
+    {
+      isEncryptionAvailable: async () => true,
+      encryptString: async (x) => Buffer.from(x),
+      decryptString: async (b) =>
+        b.toString() === "old-cipher" ? "{}" : b.toString(),
+    },
+    200,
+  );
+  await vault.saveKey("a", "first");
+  expect(files.get("/vault.before-async")!.toString()).toBe("old-cipher");
+  await vault.saveKey("b", "second");
+  expect(files.get("/vault.before-async")!.toString()).toBe("old-cipher");
+});
