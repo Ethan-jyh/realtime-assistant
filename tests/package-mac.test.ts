@@ -20,7 +20,7 @@ function bundleFixture(dir:string, name='REA') {
 }
 test('rejects unsafe environments and CLI overrides before any builder invocation', async () => {
   let called = false;
-  const deps = { platform: 'darwin', env: {}, manifest, root: '/fixture/project', getConfig: async () => config, build: async () => { called = true; }, verify() {} };
+  const deps = { platform: 'darwin', env: {}, manifest, root: '/fixture/project', getConfig: async () => config, build: async () => { called = true; }, verify() {}, smoke:async()=>{} };
   for (const env of [{ CSC_LINK: 'fixture.p12' }, { CSC_KEY_PASSWORD: 'fixture' }, { CSC_INSTALLER_LINK: 'fixture.p12' }, { GITHUB_BASE_REF: 'main' }]) await expect(wrapper.packageMac([], { ...deps, env })).rejects.toThrow();
   await expect(wrapper.packageMac([], { ...deps, platform: 'linux' })).rejects.toThrow(/requires macOS/);
   await expect(wrapper.packageMac(['--config.mac.identity=null'], deps)).rejects.toThrow(/overrides/);
@@ -55,7 +55,7 @@ test('post-verification binds main and both helper identifiers to the pinned cer
 });
 test('rejects a bundle-name override that breaks Electron helper lookup but allows display-only renaming',async()=>{
  let built=false;
- const deps={platform:'darwin',env:{},manifest,root:'/fixture/project',build:async()=>{built=true;},verify(){}};
+ const deps={platform:'darwin',env:{},manifest,root:'/fixture/project',build:async()=>{built=true;},verify(){},smoke:async()=>{}};
  await expect(wrapper.packageMac(['--dir'],{...deps,getConfig:async()=>({...config,mac:{...config.mac,extendInfo:{CFBundleName:'腾讯会议私有部署'}}})})).rejects.toThrow(/helper/);
  expect(built).toBe(false);
  await wrapper.packageMac(['--dir'],{...deps,getConfig:async()=>({...config,mac:{...config.mac,extendInfo:{CFBundleDisplayName:'腾讯会议私有部署'}}})});

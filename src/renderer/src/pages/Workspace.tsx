@@ -1,63 +1,728 @@
-import {openMicrophone} from '../../../audio/echo';
-import {useWindowDrag} from '../hooks/useWindowDrag';
-import {MarkdownAnswer} from '../components/MarkdownAnswer';
-import React,{useState,useEffect} from 'react';
-import {ProfilesPage} from './Profiles';
-import {speakerLabel} from '../../../shared/speakers';
-const defaults={name:'',school:'',careerTarget:'',projects:'',company:'',position:'',companyIntro:'',documents:'',customPrompt:'',recordMode:'mic_speaker',deviceId:'',auto:true,language:'中文',style:'简洁明了',answerMode:'balanced',translation:false,audioEnabled:true,recordAudio:false,mode:'regular'};
-export function WorkspacePage():React.JSX.Element {
- const dragRef=useWindowDrag('prepare');
- const [settingsVersion,setSettingsVersion]=useState(0);
- useEffect(()=>window.api.onOpenSettings(()=>{setView('settings');setSettingsVersion(v=>v+1)}),[]);
- const [sessionOpen,setSessionOpen]=useState(false);
- const [micLevel,setMicLevel]=useState<number|null>(null);const [micTesting,setMicTesting]=useState(false);const [view,setView]=useState('home'),[mode,setMode]=useState('regular'),[step,setStep]=useState(0);
- const [form,setForm]=useState<any>(defaults),[devices,setDevices]=useState<MediaDeviceInfo[]>([]),[busy,setBusy]=useState(false),[error,setError]=useState('');
- const [promptStatus,setPromptStatus]=useState('');
- const [pendingDoc,setPendingDoc]=useState<any>(null),[importing,setImporting]=useState(false);
- const [audioUrl,setAudioUrl]=useState('');const [records,setRecords]=useState<any[]>([]),[detail,setDetail]=useState<any>(null);
- useEffect(()=>{window.api.getSettings().then((s:any)=>{if(s.openSettings)setView('settings');if((s.answerProvider==='realtime'?!s.hasRealtimeKey:!s.hasModelKey)&&s.answerProvider!=='codex')setView('settings');if(s.profile){setForm({...defaults,...s.profile});setMode(s.profile.mode??'regular');}}).catch(()=>setError('配置读取失败，请打开 API 配置检查'));void window.api.getSession().then((session:any)=>setSessionOpen(['starting','running','stopping'].includes(session.state)));return window.api.onSessionState((session:any)=>{setSessionOpen(['starting','running','stopping'].includes(session.state));if(session.state==='running')setError('');});},[]);
- useEffect(()=>{navigator.mediaDevices.enumerateDevices().then(d=>setDevices(d.filter(x=>x.kind==='audioinput'))).catch(()=>{});},[]);
- const testMic=async()=>{
-  if(micTesting)return;setMicTesting(true);setError('');
-  let context:AudioContext|null=null;let stream:MediaStream|null=null;
-  try{stream=await openMicrophone(form.deviceId);context=new AudioContext({sampleRate:16000});
-    await context.audioWorklet.addModule(new URL('./pcm-worklet.js',location.href));const node=new AudioWorkletNode(context,'pcm-capture');context.createMediaStreamSource(stream).connect(node).connect(context.destination);
-    node.port.onmessage=e=>setMicLevel(Math.round(Math.min(1,Math.max(...Array.from(e.data as Float32Array,Math.abs)))*100));await context.resume();await new Promise(r=>setTimeout(r,3000));
-  }catch(e:any){setError(e.message);}finally{stream?.getTracks().forEach(t=>t.stop());await context?.close().catch(()=>{});setMicTesting(false);}
- };
- const patch=(key:string,value:any)=>setForm((prev:any)=>({...prev,[key]:value}));
- const field=(key:string,label:string,area=false)=><div className="field"><label htmlFor={'profile-'+key}><span>{label}</span></label>{area?<textarea id={'profile-'+key} maxLength={key==='customPrompt'?8000:undefined} value={form[key]} onChange={e=>patch(key,e.target.value)}/>:<input id={'profile-'+key} value={form[key]} onChange={e=>patch(key,e.target.value)}/>}</div>;
- const select=(key:string,label:string,options:[string,string][])=><div className="field"><label htmlFor={'profile-'+key}><span>{label}</span></label><select id={'profile-'+key} value={form[key]} onChange={e=>patch(key,e.target.value)}>{options.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div>;
- const toggle=(key:string,label:string)=><label className="setting-row"><span>{label}</span><input type="checkbox" checked={!!form[key]} onChange={e=>patch(key,e.target.checked)}/></label>;
- const choose=(value:string)=>{setMode(value);setForm((f:any)=>({...f,mode:value,auto:value==='regular',audioEnabled:value!=='exam'}));setStep(0);setError('');setView('prepare');};
- const start=async()=>{setBusy(true);setError('');try{
-   await window.api.saveSettings({profile:form});
-   const sources=form.recordMode==='mic_speaker'?['microphone','system']:form.recordMode==='speaker'?['system']:['microphone'];
-   await window.api.startSession({sources,form:{...form,mode},recordAudio:form.recordAudio});
-   await window.api.sendWindowCommand({action:'hide_prepare'});
- }catch(e:any){setError(String(e.message).includes('ASR_NOT_CONFIGURED')?'请先在 API 配置中保存阿里 ASR 密钥，或关闭音频采集使用文字问答。':String(e.message));}finally{setBusy(false);}};
- const perform=async(action:()=>Promise<any>)=>{setError('');try{return await action();}catch(e:any){setError(e.message??'操作失败，请重试');}};
- const showHistory=async()=>{setView('history');setDetail(null);await perform(async()=>setRecords(await window.api.listHistory()));};
- if(view==='settings')return <div className="workspace-settings"><ProfilesPage key={settingsVersion} onBack={()=>setView('home')}/></div>;
- return <div ref={dragRef} className="shell workspace-shell" data-view={view}><div className="glass"><header className="titlebar"><span>{view==='home'?'企业微信私有版':view==='history'?'会话记录':'开始辅助'}</span><div className="controls"><button className="icon-btn" aria-label="API 配置" onClick={()=>setView('settings')}>⚙</button><button className="icon-btn" aria-label="最小化" title="最小化，继续运行" onClick={()=>window.api.sendWindowCommand({action:'minimize_prepare'})}>−</button><button className="icon-btn" aria-label="完全退出" title="停止采集、保存会话并退出" onClick={()=>window.api.sendWindowCommand({action:'quit_app'})}>×</button></div></header>
- <main className="content">{error&&view==='home'&&<p className="error" role="alert">{error}</p>}
- {view==='home'&&<div className="home-content"><div className="home-heading"><span className="eyebrow">WORKSPACE</span><h1>选择场景</h1></div>
- <div className="mode-list">{[{id:'regular',name:'开始面试',number:'01',path:'M8 10h8M8 14h5M5 4h14v14H9l-4 3V4Z'},{id:'academic',name:'学术面试',number:'02',path:'m3 9 9-5 9 5-9 5-9-5Zm4 3v5c3 3 7 3 10 0v-5M21 9v8'},{id:'exam',name:'截图问答',number:'03',path:'M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5M8 8h8v8H8Z'}].map(card=><button key={card.id} aria-label={card.name} className="mode-card" onClick={()=>choose(card.id)}><span className="scene-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={card.path}/></svg></span><strong>{card.name}</strong><span className="scene-number">{card.number}</span><span className="scene-arrow" aria-hidden="true">↗</span></button>)}</div>
- <div className="home-links">{sessionOpen&&<button className="button" onClick={()=>window.api.sendWindowCommand({action:'show_overlay'})}>返回当前会话</button>}<button className="button" onClick={showHistory}>历史记录</button><button className="button" onClick={()=>setView('settings')}>设置</button></div></div>}
- {view==='prepare'&&<><div className="topline"><button className="icon-btn" onClick={()=>setView('home')}>← 返回选择</button><span className="status">{mode==='exam'?'截图问答':mode==='academic'?'学术面试':'实时辅助'} · 准备设置</span></div>
- <nav className="tabs">{['个人信息','面试信息','录音设置'].map((label,i)=><button key={label} className={step===i?'active':''} onClick={()=>setStep(i)}>{label}</button>)}</nav>
- {step===0&&<>{field('name','姓名')}{field('school','学校 / 经历')}{field('careerTarget','求职方向')}{field('projects','项目经历',true)}{field('customPrompt','自定义提示词',true)}<div className="row"><button className="button" onClick={async()=>{setPromptStatus('正在保存…');try{await window.api.saveSettings({profile:form});setPromptStatus('提示词已保存');}catch(e:any){setPromptStatus('保存失败：'+e.message);}}}>保存提示词</button><span className="status" role="status">{promptStatus}</span></div>{field('documents','补充资料',true)}<button className="button" disabled={importing} onClick={async()=>{setError('');setImporting(true);try{const doc=await window.api.pickDocument();if(doc)setPendingDoc(doc);}catch(e:any){setError(e.message);}finally{setImporting(false);}}}>{importing?'正在读取资料…':'导入 TXT / DOCX / PDF'}</button>{pendingDoc&&<div className="answer document-preview"><h3>导入预览 · {pendingDoc.name}</h3><p className="hint">提取 {pendingDoc.text.length} 字，确认后加入补充资料。</p><pre>{pendingDoc.text.slice(0,4000)}</pre><div className="row"><button className="button primary" disabled={importing} onClick={async()=>{setImporting(true);try{await window.api.confirmDocument({token:pendingDoc.token});patch('documents',String(form.documents||'')+'\n'+pendingDoc.text);setPendingDoc(null);}catch(e:any){setError(e.message);}finally{setImporting(false);}}}>确认导入</button><button className="button" disabled={importing} onClick={()=>setPendingDoc(null)}>取消导入</button></div></div>}</>}
- {step===1&&<>{field('company','公司')}{field('position','岗位')}{field('companyIntro','公司 / 岗位介绍',true)}</>}
- {step===2&&<>{select('recordMode','录音模式',[['mic_speaker','我（麦克风）+ 对方（系统音频）'],['mic','仅我（麦克风）'],['speaker','仅对方（系统音频）']])}
- <label className="field"><span>麦克风</span><select value={form.deviceId} onChange={e=>patch('deviceId',e.target.value)}><option value="">系统默认麦克风</option>{devices.map((d,i)=><option key={d.deviceId||i} value={d.deviceId}>{d.label||`麦克风 ${i+1}`}</option>)}</select></label><div className="row"><button className="button" disabled={micTesting} onClick={testMic}>{micTesting?'正在测试麦克风…':'测试麦克风'}</button>{micLevel!==null&&<span className="status">输入电平 {micLevel}%</span>}</div>
- {toggle('audioEnabled','采集实时音频')}{toggle('recordAudio','保存录音')}{mode==='regular'&&toggle('auto','自动生成回答')}
- {select('answerMode','回答思考模式',[['balanced','平衡（普通问题快速、编程题思考）'],['deep','深度思考']])}{select('language','回答语言',[['中文','中文'],['English','English']])}{select('style','回答风格',[['简洁明了','简洁明了'],['详细解释','详细解释'],['分点回答','分点回答']])}
- {toggle('translation','实时翻译')}</>}
- {error&&<p className="error" role="alert">{error}</p>}
- <div className="wizard-actions"><button className="button" disabled={step===0||busy} onClick={()=>setStep(step-1)}>上一步</button>{step<2&&<button className="button" disabled={busy} onClick={()=>setStep(step+1)}>下一步</button>}</div></>}
- {view==='history'&&<>{error&&<p className="error" role="alert">{error}</p>}<button className="icon-btn" onClick={()=>setView('home')}>← 返回选择</button><h2>会话与录音记录</h2>{!records.length&&<p className="hint">暂无会话记录。</p>}
- {records.map(record=><div key={record.id} className="history-row"><div><strong>{record.form?.company||record.form?.name||'实时会话'}</strong><p className="hint">{new Date(record.startedAt).toLocaleString()} · {record.state}</p></div><div className="row"><button className="button" onClick={()=>perform(async()=>setDetail(await window.api.getHistory({sessionId:record.id})))}>查看</button><button className="button" onClick={()=>perform(async()=>{const result=await window.api.revealHistory({sessionId:record.id});if(result)throw Error(result);})}>录音文件</button><button className="button" onClick={()=>perform(()=>window.api.exportHistory({sessionId:record.id}))}>导出</button><button className="button" onClick={async()=>{if(confirm('移入本地回收目录？')){await perform(async()=>{await window.api.deleteHistory({sessionId:record.id});await showHistory();});}}}>移除</button></div></div>)}
- {audioUrl&&<audio controls src={audioUrl} style={{width:'100%',marginTop:12}}/>}
- {detail&&<div className="answer"><h3>录音播放</h3><div className="row">{['microphone','system'].map(source=><button key={source} className="button" onClick={async()=>{try{const data=await window.api.getHistoryAudio({sessionId:detail.id,sourceId:source});if(data.large){setError('录音较大，请在访达播放');return;}if(audioUrl)URL.revokeObjectURL(audioUrl);setAudioUrl(URL.createObjectURL(new Blob([new Uint8Array(data.bytes)],{type:'audio/wav'})));}catch{setError('该来源没有保存的录音');}}}>{source==='microphone'?'播放麦克风录音':'播放系统录音'}</button>)}</div><h3>确认转写</h3>{detail.transcripts.filter((x:any)=>x.isFinal).map((x:any,i:number)=><p key={i}>[{speakerLabel(x.sourceId)}] {x.text}</p>)}<h3>回答</h3>{detail.answers.map((x:any,i:number)=><div key={i}><p>问题：{x.question}</p><MarkdownAnswer text={x.text}/></div>)}</div>}</>}
- </main>{view==='prepare'&&<footer className="footer prepare-footer"><button className="button primary" disabled={busy} onClick={()=>sessionOpen?window.api.sendWindowCommand({action:'show_overlay'}):start()}>{busy?'正在启动…':sessionOpen?'返回当前会话':form.audioEnabled?'▶ 开始实时转写':mode==='exam'?'▶ 开始截图问答':'▶ 开始文字会话'}</button></footer>}</div></div>;
+import { openMicrophone } from "../../../audio/echo";
+import { useWindowDrag } from "../hooks/useWindowDrag";
+import { MarkdownAnswer } from "../components/MarkdownAnswer";
+import React, { useState, useEffect } from "react";
+import { ProfilesPage } from "./Profiles";
+import { speakerLabel } from "../../../shared/speakers";
+const defaults = {
+  name: "",
+  school: "",
+  careerTarget: "",
+  projects: "",
+  company: "",
+  position: "",
+  companyIntro: "",
+  documents: "",
+  customPrompt: "",
+  recordMode: "mic_speaker",
+  deviceId: "",
+  auto: true,
+  language: "中文",
+  style: "简洁明了",
+  answerMode: "balanced",
+  translation: false,
+  audioEnabled: true,
+  recordAudio: false,
+  mode: "regular",
+};
+export function WorkspacePage(): React.JSX.Element {
+  const dragRef = useWindowDrag("prepare");
+  const [settingsVersion, setSettingsVersion] = useState(0);
+  useEffect(
+    () =>
+      window.api.onOpenSettings(() => {
+        setView("settings");
+        setSettingsVersion((v) => v + 1);
+      }),
+    [],
+  );
+  const [sessionOpen, setSessionOpen] = useState(false);
+  const [micLevel, setMicLevel] = useState<number | null>(null);
+  const [micTesting, setMicTesting] = useState(false);
+  const [view, setView] = useState("home"),
+    [mode, setMode] = useState("regular"),
+    [step, setStep] = useState(0);
+  const [form, setForm] = useState<any>(defaults),
+    [devices, setDevices] = useState<MediaDeviceInfo[]>([]),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  const [promptStatus, setPromptStatus] = useState("");
+  const [pendingDoc, setPendingDoc] = useState<any>(null),
+    [importing, setImporting] = useState(false);
+  const [audioUrl, setAudioUrl] = useState("");
+  const [records, setRecords] = useState<any[]>([]),
+    [detail, setDetail] = useState<any>(null);
+  useEffect(() => {
+    window.api
+      .getSettings()
+      .then((s: any) => {
+        if (s.openSettings) setView("settings");
+        if (
+          (s.answerProvider === "realtime"
+            ? !s.hasRealtimeKey
+            : !s.hasModelKey) &&
+          s.answerProvider !== "codex"
+        )
+          setView("settings");
+        if (s.profile) {
+          setForm({ ...defaults, ...s.profile });
+          setMode(s.profile.mode ?? "regular");
+        }
+      })
+      .catch(() => setError("配置读取失败，请打开 API 配置检查"));
+    void window.api
+      .getSession()
+      .then((session: any) =>
+        setSessionOpen(
+          ["starting", "running", "stopping"].includes(session.state),
+        ),
+      );
+    return window.api.onSessionState((session: any) => {
+      setSessionOpen(
+        ["starting", "running", "stopping"].includes(session.state),
+      );
+      if (session.state === "running") setError("");
+    });
+  }, []);
+  useEffect(() => {
+    navigator.mediaDevices
+      .enumerateDevices()
+      .then((d) => setDevices(d.filter((x) => x.kind === "audioinput")))
+      .catch(() => {});
+  }, []);
+  const testMic = async () => {
+    if (micTesting) return;
+    setMicTesting(true);
+    setError("");
+    let context: AudioContext | null = null;
+    let stream: MediaStream | null = null;
+    try {
+      stream = await openMicrophone(form.deviceId);
+      context = new AudioContext({ sampleRate: 16000 });
+      await context.audioWorklet.addModule(
+        new URL("./pcm-worklet.js", location.href),
+      );
+      const node = new AudioWorkletNode(context, "pcm-capture");
+      context
+        .createMediaStreamSource(stream)
+        .connect(node)
+        .connect(context.destination);
+      node.port.onmessage = (e) =>
+        setMicLevel(
+          Math.round(
+            Math.min(
+              1,
+              Math.max(...Array.from(e.data as Float32Array, Math.abs)),
+            ) * 100,
+          ),
+        );
+      await context.resume();
+      await new Promise((r) => setTimeout(r, 3000));
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      stream?.getTracks().forEach((t) => t.stop());
+      await context?.close().catch(() => {});
+      setMicTesting(false);
+    }
+  };
+  const patch = (key: string, value: any) =>
+    setForm((prev: any) => ({ ...prev, [key]: value }));
+  const field = (key: string, label: string, area = false) => (
+    <div className="field">
+      <label htmlFor={"profile-" + key}>
+        <span>{label}</span>
+      </label>
+      {area ? (
+        <textarea
+          id={"profile-" + key}
+          maxLength={key === "customPrompt" ? 8000 : undefined}
+          value={form[key]}
+          onChange={(e) => patch(key, e.target.value)}
+        />
+      ) : (
+        <input
+          id={"profile-" + key}
+          value={form[key]}
+          onChange={(e) => patch(key, e.target.value)}
+        />
+      )}
+    </div>
+  );
+  const select = (key: string, label: string, options: [string, string][]) => (
+    <div className="field">
+      <label htmlFor={"profile-" + key}>
+        <span>{label}</span>
+      </label>
+      <select
+        id={"profile-" + key}
+        value={form[key]}
+        onChange={(e) => patch(key, e.target.value)}
+      >
+        {options.map(([v, l]) => (
+          <option key={v} value={v}>
+            {l}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+  const toggle = (key: string, label: string) => (
+    <label className="setting-row">
+      <span>{label}</span>
+      <input
+        type="checkbox"
+        checked={!!form[key]}
+        onChange={(e) => patch(key, e.target.checked)}
+      />
+    </label>
+  );
+  const choose = (value: string) => {
+    setMode(value);
+    setForm((f: any) => ({
+      ...f,
+      mode: value,
+      auto: value === "regular",
+      audioEnabled: value !== "exam",
+    }));
+    setStep(0);
+    setError("");
+    setView("prepare");
+  };
+  const start = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await window.api.saveSettings({ profile: form });
+      const sources =
+        form.recordMode === "mic_speaker"
+          ? ["microphone", "system"]
+          : form.recordMode === "speaker"
+            ? ["system"]
+            : ["microphone"];
+      await window.api.startSession({
+        sources,
+        form: { ...form, mode },
+        recordAudio: form.recordAudio,
+      });
+      await window.api.sendWindowCommand({ action: "hide_prepare" });
+    } catch (e: any) {
+      setError(
+        String(e.message).includes("ASR_NOT_CONFIGURED")
+          ? "请先在 API 配置中保存阿里 ASR 密钥，或关闭音频采集使用文字问答。"
+          : String(e.message),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  const perform = async (action: () => Promise<any>) => {
+    setError("");
+    try {
+      return await action();
+    } catch (e: any) {
+      setError(e.message ?? "操作失败，请重试");
+    }
+  };
+  const showHistory = async () => {
+    setView("history");
+    setDetail(null);
+    await perform(async () => setRecords(await window.api.listHistory()));
+  };
+  if (view === "settings")
+    return (
+      <div className="workspace-settings">
+        <ProfilesPage key={settingsVersion} onBack={() => setView("home")} />
+      </div>
+    );
+  return (
+    <div ref={dragRef} className="shell workspace-shell" data-view={view}>
+      <div className="glass">
+        <header className="titlebar">
+          <span>
+            {view === "home"
+              ? "企业微信私有版"
+              : view === "history"
+                ? "会话记录"
+                : "开始辅助"}
+          </span>
+          <div className="controls">
+            <button
+              className="icon-btn"
+              aria-label="API 配置"
+              onClick={() => setView("settings")}
+            >
+              ⚙
+            </button>
+            <button
+              className="icon-btn"
+              aria-label="最小化"
+              title="最小化，继续运行"
+              onClick={() =>
+                window.api.sendWindowCommand({ action: "minimize_prepare" })
+              }
+            >
+              −
+            </button>
+            <button
+              className="icon-btn"
+              aria-label="完全退出"
+              title="停止采集、保存会话并退出"
+              onClick={() =>
+                window.api.sendWindowCommand({ action: "quit_app" })
+              }
+            >
+              ×
+            </button>
+          </div>
+        </header>
+        <main className="content">
+          {error && view === "home" && (
+            <p className="error" role="alert">
+              {error}
+            </p>
+          )}
+          {view === "home" && (
+            <div className="home-content">
+              <div className="home-heading">
+                <span className="eyebrow">WORKSPACE</span>
+                <h1>选择场景</h1>
+              </div>
+              <div className="mode-list">
+                {[
+                  {
+                    id: "regular",
+                    name: "开始面试",
+                    number: "01",
+                    path: "M8 10h8M8 14h5M5 4h14v14H9l-4 3V4Z",
+                  },
+                  {
+                    id: "academic",
+                    name: "学术面试",
+                    number: "02",
+                    path: "m3 9 9-5 9 5-9 5-9-5Zm4 3v5c3 3 7 3 10 0v-5M21 9v8",
+                  },
+                  {
+                    id: "exam",
+                    name: "截图问答",
+                    number: "03",
+                    path: "M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5M8 8h8v8H8Z",
+                  },
+                ].map((card) => (
+                  <button
+                    key={card.id}
+                    aria-label={card.name}
+                    className="mode-card"
+                    onClick={() => choose(card.id)}
+                  >
+                    <span className="scene-icon">
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.4"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d={card.path} />
+                      </svg>
+                    </span>
+                    <strong>{card.name}</strong>
+                    <span className="scene-number">{card.number}</span>
+                    <span className="scene-arrow" aria-hidden="true">
+                      ↗
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <div className="home-links">
+                {sessionOpen && (
+                  <button
+                    className="button"
+                    onClick={() =>
+                      window.api.sendWindowCommand({ action: "show_overlay" })
+                    }
+                  >
+                    返回当前会话
+                  </button>
+                )}
+                <button className="button" onClick={showHistory}>
+                  历史记录
+                </button>
+                <button className="button" onClick={() => setView("settings")}>
+                  设置
+                </button>
+              </div>
+            </div>
+          )}
+          {view === "prepare" && (
+            <>
+              <div className="topline">
+                <button className="icon-btn" onClick={() => setView("home")}>
+                  ← 返回选择
+                </button>
+                <span className="status">
+                  {mode === "exam"
+                    ? "截图问答"
+                    : mode === "academic"
+                      ? "学术面试"
+                      : "实时辅助"}{" "}
+                  · 准备设置
+                </span>
+              </div>
+              <nav className="tabs">
+                {["个人信息", "面试信息", "录音设置"].map((label, i) => (
+                  <button
+                    key={label}
+                    className={step === i ? "active" : ""}
+                    onClick={() => setStep(i)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </nav>
+              {step === 0 && (
+                <>
+                  {field("name", "姓名")}
+                  {field("school", "学校 / 经历")}
+                  {field("careerTarget", "求职方向")}
+                  {field("projects", "项目经历", true)}
+                  {field("customPrompt", "自定义提示词", true)}
+                  <div className="row">
+                    <button
+                      className="button"
+                      onClick={async () => {
+                        setPromptStatus("正在保存…");
+                        try {
+                          await window.api.saveSettings({ profile: form });
+                          setPromptStatus("提示词已保存");
+                        } catch (e: any) {
+                          setPromptStatus("保存失败：" + e.message);
+                        }
+                      }}
+                    >
+                      保存提示词
+                    </button>
+                    <span className="status" role="status">
+                      {promptStatus}
+                    </span>
+                  </div>
+                  {field("documents", "补充资料", true)}
+                  <button
+                    className="button"
+                    disabled={importing}
+                    onClick={async () => {
+                      setError("");
+                      setImporting(true);
+                      try {
+                        const doc = await window.api.pickDocument();
+                        if (doc) setPendingDoc(doc);
+                      } catch (e: any) {
+                        setError(e.message);
+                      } finally {
+                        setImporting(false);
+                      }
+                    }}
+                  >
+                    {importing ? "正在读取资料…" : "导入 TXT / DOCX / PDF"}
+                  </button>
+                  {pendingDoc && (
+                    <div className="answer document-preview">
+                      <h3>导入预览 · {pendingDoc.name}</h3>
+                      <p className="hint">
+                        提取 {pendingDoc.text.length} 字，确认后加入补充资料。
+                      </p>
+                      <pre>{pendingDoc.text.slice(0, 4000)}</pre>
+                      <div className="row">
+                        <button
+                          className="button primary"
+                          disabled={importing}
+                          onClick={async () => {
+                            setImporting(true);
+                            try {
+                              await window.api.confirmDocument({
+                                token: pendingDoc.token,
+                              });
+                              patch(
+                                "documents",
+                                String(form.documents || "") +
+                                  "\n" +
+                                  pendingDoc.text,
+                              );
+                              setPendingDoc(null);
+                            } catch (e: any) {
+                              setError(e.message);
+                            } finally {
+                              setImporting(false);
+                            }
+                          }}
+                        >
+                          确认导入
+                        </button>
+                        <button
+                          className="button"
+                          disabled={importing}
+                          onClick={() => setPendingDoc(null)}
+                        >
+                          取消导入
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+              {step === 1 && (
+                <>
+                  {field("company", "公司")}
+                  {field("position", "岗位")}
+                  {field("companyIntro", "公司 / 岗位介绍", true)}
+                </>
+              )}
+              {step === 2 && (
+                <>
+                  {select("recordMode", "录音模式", [
+                    ["mic_speaker", "我（麦克风）+ 对方（系统音频）"],
+                    ["mic", "仅我（麦克风）"],
+                    ["speaker", "仅对方（系统音频）"],
+                  ])}
+                  <label className="field">
+                    <span>麦克风</span>
+                    <select
+                      value={form.deviceId}
+                      onChange={(e) => patch("deviceId", e.target.value)}
+                    >
+                      <option value="">系统默认麦克风</option>
+                      {devices.map((d, i) => (
+                        <option key={d.deviceId || i} value={d.deviceId}>
+                          {d.label || `麦克风 ${i + 1}`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="row">
+                    <button
+                      className="button"
+                      disabled={micTesting}
+                      onClick={testMic}
+                    >
+                      {micTesting ? "正在测试麦克风…" : "测试麦克风"}
+                    </button>
+                    {micLevel !== null && (
+                      <span className="status">输入电平 {micLevel}%</span>
+                    )}
+                  </div>
+                  {toggle("audioEnabled", "采集实时音频")}
+                  {toggle("recordAudio", "保存录音")}
+                  {mode === "regular" && toggle("auto", "自动生成回答")}
+                  {select("answerMode", "回答思考模式", [
+                    ["balanced", "平衡（普通问题快速、编程题思考）"],
+                    ["deep", "深度思考"],
+                  ])}
+                  {select("language", "回答语言", [
+                    ["中文", "中文"],
+                    ["English", "English"],
+                  ])}
+                  {select("style", "回答风格", [
+                    ["简洁明了", "简洁明了"],
+                    ["详细解释", "详细解释"],
+                    ["分点回答", "分点回答"],
+                  ])}
+                  {toggle("translation", "实时翻译")}
+                </>
+              )}
+              {error && (
+                <p className="error" role="alert">
+                  {error}
+                </p>
+              )}
+              <div className="wizard-actions">
+                <button
+                  className="button"
+                  disabled={step === 0 || busy}
+                  onClick={() => setStep(step - 1)}
+                >
+                  上一步
+                </button>
+                {step < 2 && (
+                  <button
+                    className="button"
+                    disabled={busy}
+                    onClick={() => setStep(step + 1)}
+                  >
+                    下一步
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+          {view === "history" && (
+            <>
+              {error && (
+                <p className="error" role="alert">
+                  {error}
+                </p>
+              )}
+              <button className="icon-btn" onClick={() => setView("home")}>
+                ← 返回选择
+              </button>
+              <h2>会话与录音记录</h2>
+              {!records.length && <p className="hint">暂无会话记录。</p>}
+              {records.map((record) => (
+                <div key={record.id} className="history-row">
+                  <div>
+                    <strong>
+                      {record.form?.company || record.form?.name || "实时会话"}
+                    </strong>
+                    <p className="hint">
+                      {new Date(record.startedAt).toLocaleString()} ·{" "}
+                      {record.state}
+                    </p>
+                  </div>
+                  <div className="row">
+                    <button
+                      className="button"
+                      onClick={() =>
+                        perform(async () =>
+                          setDetail(
+                            await window.api.getHistory({
+                              sessionId: record.id,
+                            }),
+                          ),
+                        )
+                      }
+                    >
+                      查看
+                    </button>
+                    <button
+                      className="button"
+                      onClick={() =>
+                        perform(async () => {
+                          const result = await window.api.revealHistory({
+                            sessionId: record.id,
+                          });
+                          if (result) throw Error(result);
+                        })
+                      }
+                    >
+                      录音文件
+                    </button>
+                    <button
+                      className="button"
+                      onClick={() =>
+                        perform(() =>
+                          window.api.exportHistory({ sessionId: record.id }),
+                        )
+                      }
+                    >
+                      导出
+                    </button>
+                    <button
+                      className="button"
+                      onClick={async () => {
+                        if (confirm("移入本地回收目录？")) {
+                          await perform(async () => {
+                            await window.api.deleteHistory({
+                              sessionId: record.id,
+                            });
+                            await showHistory();
+                          });
+                        }
+                      }}
+                    >
+                      移除
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {audioUrl && (
+                <audio
+                  controls
+                  src={audioUrl}
+                  style={{ width: "100%", marginTop: 12 }}
+                />
+              )}
+              {detail && (
+                <div className="answer">
+                  <h3>录音播放</h3>
+                  <div className="row">
+                    {["microphone", "system"].map((source) => (
+                      <button
+                        key={source}
+                        className="button"
+                        onClick={async () => {
+                          try {
+                            const data = await window.api.getHistoryAudio({
+                              sessionId: detail.id,
+                              sourceId: source,
+                            });
+                            if (data.large) {
+                              setError("录音较大，请在访达播放");
+                              return;
+                            }
+                            if (audioUrl) URL.revokeObjectURL(audioUrl);
+                            setAudioUrl(
+                              URL.createObjectURL(
+                                new Blob([new Uint8Array(data.bytes)], {
+                                  type: "audio/wav",
+                                }),
+                              ),
+                            );
+                          } catch {
+                            setError("该来源没有保存的录音");
+                          }
+                        }}
+                      >
+                        {source === "microphone"
+                          ? "播放麦克风录音"
+                          : "播放系统录音"}
+                      </button>
+                    ))}
+                  </div>
+                  <h3>确认转写</h3>
+                  {detail.transcripts
+                    .filter((x: any) => x.isFinal)
+                    .map((x: any, i: number) => (
+                      <p key={i}>
+                        [{speakerLabel(x.sourceId)}] {x.text}
+                      </p>
+                    ))}
+                  <h3>回答</h3>
+                  {detail.answers.map((x: any, i: number) => (
+                    <div key={i}>
+                      <p>问题：{x.question}</p>
+                      <MarkdownAnswer text={x.text} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </main>
+        {view === "prepare" && (
+          <footer className="footer prepare-footer">
+            <button
+              className="button primary"
+              disabled={busy}
+              onClick={() =>
+                sessionOpen
+                  ? window.api.sendWindowCommand({ action: "show_overlay" })
+                  : start()
+              }
+            >
+              {busy
+                ? "正在启动…"
+                : sessionOpen
+                  ? "返回当前会话"
+                  : form.audioEnabled
+                    ? "▶ 开始实时转写"
+                    : mode === "exam"
+                      ? "▶ 开始截图问答"
+                      : "▶ 开始文字会话"}
+            </button>
+          </footer>
+        )}
+      </div>
+    </div>
+  );
 }

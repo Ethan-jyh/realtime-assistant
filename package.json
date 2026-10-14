@@ -1,6 +1,6 @@
 {
   "name": "local-realtime-assistant",
-  "version": "0.2.22",
+  "version": "0.2.23",
   "description": "Local Realtime Assistant",
   "main": "./out/main/index.js",
   "author": "Local Realtime Assistant Team",
