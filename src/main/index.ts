@@ -10,6 +10,8 @@ import {
 } from "electron";
 import { join, basename } from "path";
 import { SecretVault } from "./settings/vault";
+import { TurnTrace } from "./diagnostics/turn-trace";
+import { asyncCrypto } from "./settings/async-crypto";
 import {
   ModelClient,
   type ModelRequestOptions,
@@ -176,15 +178,6 @@ app.whenReady().then(async () => {
 
   windowManager.setOpacity(extras.opacity);
   const vaultPath = join(app.getPath("userData"), "secrets.vault");
-  vault = new SecretVault({
-    storagePath: vaultPath,
-    cryptoEngine: {
-      isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
-      encryptString: (plain) => safeStorage.encryptString(plain),
-      decryptString: (cipher) => safeStorage.decryptString(cipher),
-    },
-  });
-
   // Chromium follows the macOS system proxy; Node fetch does not.
   const profiles = new ProviderProfiles(
     join(app.getPath("userData"), "provider-profiles.json"),
@@ -202,13 +195,6 @@ app.whenReady().then(async () => {
   ) => `provider:${id}:${kind}`;
   // Migrate old encrypted keys once; keep legacy entries for rollback to older packages.
   const initialProfile = profiles.active();
-  if (profiles.migrated)
-    for (const kind of ["model", "asr"] as const) {
-      if (!(await vault.hasKey(profileKey(kind)))) {
-        const old = await vault.getKey(kind + "_key");
-        if (old) await vault.saveKey(profileKey(kind), old);
-      }
-    }
   if (
     profiles.migrated &&
     profiles.snapshot().profiles.length === 1 &&
@@ -224,13 +210,6 @@ app.whenReady().then(async () => {
         modelName: "qwen3.8-omni-flash-realtime",
       },
     });
-    for (const [kind, source] of [
-      ["realtime", "asr"],
-      ["model", "model"],
-    ] as const) {
-      const old = await vault.getKey(profileKey(source));
-      if (old) await vault.saveKey(profileKey(kind, realtime.id), old);
-    }
   }
   if (!profiles.snapshot().profiles.some((p) => p.answerProvider === "codex"))
     await profiles.upsert({
@@ -238,6 +217,28 @@ app.whenReady().then(async () => {
       answerProvider: "codex",
       codex: { modelName: "gpt-6.1-sol", effort: "low" },
     });
+  const aliases: Record<string, string> = {};
+  const primary = profiles.snapshot().profiles[0];
+  for (const kind of ["model", "asr"] as const)
+    aliases[profileKey(kind, primary.id)] = kind + "_key";
+  const legacyRealtime = profiles
+    .snapshot()
+    .profiles.find(
+      (p) => p.name === "实时问答" && p.answerProvider === "realtime",
+    );
+  if (legacyRealtime) {
+    aliases[profileKey("realtime", legacyRealtime.id)] = "asr_key";
+    aliases[profileKey("model", legacyRealtime.id)] = "model_key";
+  }
+  vault = new SecretVault({
+    storagePath: vaultPath,
+    cryptoEngine: asyncCrypto(safeStorage),
+    aliases,
+    onStatus: (vaultState, durationMs) =>
+      diagnostics.write("vault.status", { vaultState, durationMs }),
+  });
+  const configuredKey = async (key: string) =>
+    (await vault!.keyPresence(key)) !== "absent";
   const applyProfile = async (value: ProviderProfile) => {
     if (value.model) {
       await settingsStore.save(value.model);
@@ -473,7 +474,9 @@ app.whenReady().then(async () => {
       pending: autoQueue.snapshot.length + realtimePending.length,
       busy: !requestSlot.isDone(),
     });
+  let fastTrace: TurnTrace | null = null;
   const cancelCurrent = (restore: boolean, reason = "interrupted") => {
+    fastTrace?.settle("cancelled");
     if (restore && activeAutomatic) autoQueue.requeue(activeAutomatic.segments);
     const previous = core.answers.findLast(
       (x) => x.state === "generating" && x.lane !== "deep",
@@ -551,6 +554,8 @@ app.whenReady().then(async () => {
         kind,
         automatic: true,
         autoSegments: segments,
+        traceTurnId: turnId,
+        enqueuedAt: times.length ? Math.min(...times) : Date.now(),
       }).catch(() => {
         if (core.id !== ownerSession || !requestSlot.accept(ownerGeneration))
           return;
@@ -644,6 +649,14 @@ app.whenReady().then(async () => {
         generation = ++deepGeneration,
         requestId = randomUUID(),
         startedAt = Date.now();
+      const trace = new TurnTrace(diagnostics, {
+        sessionId: owner ?? "manual",
+        turnId: job.traceTurnId ?? requestId,
+        requestId,
+        lane: "deep",
+        enqueuedAt: job.enqueuedAt,
+      });
+      trace.mark("credentials");
       const record = {
         requestId,
         lane: "deep",
@@ -675,6 +688,15 @@ app.whenReady().then(async () => {
       const finish = (reason: string, error?: Error) => {
         if (terminal) return;
         terminal = true;
+        trace.settle(
+          error
+            ? diagnosticReason(error) === "timeout"
+              ? "timeout"
+              : "error"
+            : reason === "interrupted"
+              ? "cancelled"
+              : "completed",
+        );
         complete();
         record.sequence++;
         record.finishReason = reason;
@@ -735,6 +757,7 @@ app.whenReady().then(async () => {
               }
             : m,
         );
+        trace.mark("context");
         diagnostics.write("deep.context", {
           generation,
           transcriptCount: core.segments.filter((x) => x.isFinal).length,
@@ -761,7 +784,10 @@ app.whenReady().then(async () => {
           ),
         };
         const callbacks: ModelStreamHandlers = {
+          onRequest: (attempt) => trace.upstream(attempt),
+          onResponse: () => trace.mark("headers"),
           onToken: (token) => {
+            trace.firstOutput(token);
             if (terminal || signal.aborted || owner !== core.id) return;
             if (!record.text)
               diagnostics.write("deep.first_output", {
@@ -791,7 +817,16 @@ app.whenReady().then(async () => {
   );
   const offerDeep = (job: DeepJob) => {
     if (!extras.deepProfileId) return;
-    deepQueue.offer(job);
+    const queuedJob = {
+      ...job,
+      enqueuedAt: job.enqueuedAt ?? Date.now(),
+      traceTurnId: job.traceTurnId ?? randomUUID(),
+    };
+    diagnostics.write("deep.queued", {
+      turnKey: safeKey(queuedJob.traceTurnId),
+      lane: "deep",
+    });
+    deepQueue.offer(queuedJob);
   };
   const core = new CoreSession(
     historyRoot,
@@ -1475,20 +1510,12 @@ app.whenReady().then(async () => {
         ["starting", "running", "stopping"].includes(core.state) ||
         !requestSlot.isDone(),
       profiles: await Promise.all(
-        profiles
-          .snapshot()
-          .profiles.map(async (p) => ({
-            ...p,
-            hasModelKey: await vault
-              ?.hasKey(profileKey("model", p.id))
-              .catch(() => false),
-            hasAsrKey: await vault
-              ?.hasKey(profileKey("asr", p.id))
-              .catch(() => false),
-            hasRealtimeKey: await vault
-              ?.hasKey(profileKey("realtime", p.id))
-              .catch(() => false),
-          })),
+        profiles.snapshot().profiles.map(async (p) => ({
+          ...p,
+          hasModelKey: await configuredKey(profileKey("model", p.id)),
+          hasAsrKey: await configuredKey(profileKey("asr", p.id)),
+          hasRealtimeKey: await configuredKey(profileKey("realtime", p.id)),
+        })),
       ),
     }),
     [IPC_CHANNELS.PROFILES_SELECT]: async (payload) => {
@@ -1554,14 +1581,13 @@ app.whenReady().then(async () => {
       settingsRequested = false;
       return {
         openSettings,
+        vaultStatus: vault!.status,
         showTranscripts: extras.showTranscripts !== false,
         deepProfileId: extras.deepProfileId ?? null,
         activeProfileId: profiles.snapshot().activeId,
         answerProvider: extras.answerProvider ?? "api",
         realtime: extras.realtime,
-        hasRealtimeKey: await vault
-          ?.hasKey(profileKey("realtime"))
-          .catch(() => false),
+        hasRealtimeKey: await configuredKey(profileKey("realtime")),
         codex: extras.codex ?? { modelName: "", effort: "" },
         baseUrl: modelSettings.baseUrl,
         modelName: modelSettings.modelName,
@@ -1570,10 +1596,8 @@ app.whenReady().then(async () => {
         profile: extras.profile ?? {},
         asr: extras.asr,
         asrStatus: extras.asr ? "configured" : "not_configured",
-        hasModelKey: await vault
-          ?.hasKey(profileKey("model"))
-          .catch(() => false),
-        hasAsrKey: await vault?.hasKey(profileKey("asr")).catch(() => false),
+        hasModelKey: await configuredKey(profileKey("model")),
+        hasAsrKey: await configuredKey(profileKey("asr")),
       };
     },
     [IPC_CHANNELS.SETTINGS_SAVE]: async (payload) => {
@@ -2021,12 +2045,14 @@ app.whenReady().then(async () => {
     },
 
     [IPC_CHANNELS.ANSWER_ASK]: async (payload) => {
+      const traceTurnId = payload.traceTurnId ?? randomUUID();
       if (!payload.automatic) {
         if (!core.form.paused) deepQueue.resume();
         offerDeep({
           question: payload.question,
           kind: payload.kind ?? "knowledge",
           image: payload.image,
+          traceTurnId,
         });
       }
       if (payload.automatic && !requestSlot.isDone()) {
@@ -2045,6 +2071,15 @@ app.whenReady().then(async () => {
       });
       const requestId = randomUUID();
       const requestStartedAt = Date.now();
+      const trace = new TurnTrace(diagnostics, {
+        sessionId: core.id ?? "manual",
+        turnId: traceTurnId,
+        requestId,
+        lane: "fast",
+        enqueuedAt: payload.enqueuedAt,
+      });
+      fastTrace = trace;
+      trace.mark("credentials");
       const controller = new AbortController();
       currentAbortController = controller;
 
@@ -2087,6 +2122,7 @@ app.whenReady().then(async () => {
       });
       const failRequest = (err: Error) => {
         if (!requestSlot.finish(generation)) return;
+        trace.settle(diagnosticReason(err) === "timeout" ? "timeout" : "error");
         diagnostics.write("answer.failed", {
           generation,
           reason: diagnosticReason(err),
@@ -2158,8 +2194,12 @@ app.whenReady().then(async () => {
                     : "model",
                 ),
               )) ?? undefined);
-      } catch {
-        failRequest(Error("密钥读取失败，请检查配置后重试"));
+      } catch (error) {
+        failRequest(
+          error instanceof Error
+            ? error
+            : Error("密钥读取失败，请检查配置后重试"),
+        );
         return { requestId, generation };
       }
       if (!requestSlot.accept(generation)) return { requestId, generation };
@@ -2174,6 +2214,7 @@ app.whenReady().then(async () => {
         modelSettings.modelName,
         Boolean(payload.image),
       );
+      trace.mark("policy");
       diagnostics.write("answer.policy", {
         generation,
         provider: answerProvider,
@@ -2243,7 +2284,9 @@ app.whenReady().then(async () => {
           signal: controller.signal,
         },
         {
+          onRequest: (attempt) => trace.upstream(attempt),
           onResponse: () => {
+            trace.mark("headers");
             if (requestSlot.accept(generation))
               diagnostics.write("answer.headers", {
                 generation,
@@ -2261,6 +2304,7 @@ app.whenReady().then(async () => {
             }
           },
           onToken: (token) => {
+            trace.firstOutput(token);
             if (requestSlot.accept(generation)) {
               if (!answerRecord.text)
                 diagnostics.write("answer.first_output", {
@@ -2282,6 +2326,11 @@ app.whenReady().then(async () => {
           },
           onFinish: (reason) => {
             if (requestSlot.finish(generation)) {
+              trace.settle(
+                ["interrupted", "reconnecting"].includes(reason)
+                  ? "cancelled"
+                  : "completed",
+              );
               diagnostics.write("answer.finished", {
                 generation,
                 reason,
@@ -2429,6 +2478,7 @@ app.whenReady().then(async () => {
     rendererOrigins(rendererUrl),
     handlers,
   );
+  diagnostics.write("app.ready");
 
   desktopMenu = new DesktopMenu({
     iconPath: desktopResource("tray-wecom.png"),

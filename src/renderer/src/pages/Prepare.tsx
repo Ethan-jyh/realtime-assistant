@@ -62,6 +62,8 @@ export function PreparePage({
               hasAsrKey: !!initialProfile.hasAsrKey,
             }
           : settings;
+        if (["timeout", "locked"].includes(s.vaultStatus))
+          setTestStatus("密钥暂不可读取，请重试或检查钥匙串授权");
         setWorkspaceId(s.realtime?.workspaceId ?? "");
         setRegion(s.realtime?.region ?? "cn-beijing");
         setRealtimeModel(
