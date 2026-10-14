@@ -43,6 +43,7 @@ const flags = new Set([
   "auto",
 ]);
 const enums: Record<string, Set<string>> = {
+  cryptoStage:new Set(['availability','encrypt','decrypt']),
   lane: new Set(["fast", "deep"]),
   outcome: new Set(["completed", "cancelled", "timeout", "error"]),
   phase: new Set([

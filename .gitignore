@@ -22,7 +22,7 @@ build/system-audio
 
 # Local credentials, runtime data and signed artifacts
 *.log
-*.vault
+*.vault*
 *.keychain*
 *.p12
 *.pfx

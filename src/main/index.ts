@@ -10,6 +10,7 @@ import {
 } from "electron";
 import { join, basename } from "path";
 import { initializeProviderProfiles } from "./settings/bootstrap";
+import { artifactSelfTest } from "./startup/self-test";
 import { SecretVault } from "./settings/vault";
 import { TurnTrace } from "./diagnostics/turn-trace";
 import { asyncCrypto } from "./settings/async-crypto";
@@ -65,7 +66,15 @@ import { speakerLabel, isPeerSpeech } from "../shared/speakers";
 
 // Keep the macOS safeStorage identity identical in dev, packaged and validation launches.
 app.setName("local-realtime-assistant");
-const ownsInstance = app.requestSingleInstanceLock();
+const selfTest = process.argv.includes("--rea-self-test");
+if (selfTest) {
+  const data = process.argv
+    .find((x) => x.startsWith("--rea-self-test-data="))
+    ?.slice("--rea-self-test-data=".length);
+  if (!data) throw Error("SELFTEST_DATA_REQUIRED");
+  app.setPath("userData", data);
+}
+const ownsInstance = selfTest || app.requestSingleInstanceLock();
 if (!ownsInstance) app.quit();
 app.on("second-instance", () => {
   windowManager?.restoreWindow();
@@ -197,7 +206,7 @@ app.whenReady().then(async () => {
   ) => `provider:${id}:${kind}`;
   vault = new SecretVault({
     storagePath: vaultPath,
-    cryptoEngine: asyncCrypto(safeStorage),
+    cryptoEngine: asyncCrypto(safeStorage,(cryptoStage)=>diagnostics.write("vault.access_started",{cryptoStage})),
     aliases,
     onStatus: (vaultState, durationMs) =>
       diagnostics.write("vault.status", { vaultState, durationMs }),
@@ -2528,6 +2537,23 @@ app.whenReady().then(async () => {
       });
   });
 
+  if (selfTest) {
+    void artifactSelfTest(
+      windowManager!.getPrepareWindow()!,
+      vault!,
+      diagnostics,
+      process.resourcesPath,
+      process.argv.includes("--rea-self-test-vault"),
+    )
+      .catch(() => {
+        diagnostics.write("selftest.failed");
+        process.exitCode = 1;
+      })
+      .finally(async () => {
+        await diagnostics.flush();
+        app.quit();
+      });
+  }
   app.on("activate", () => {
     windowManager?.restoreWindow();
   });

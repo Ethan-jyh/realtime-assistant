@@ -1,5 +1,5 @@
 import {electronTest} from './support/electron-test';import {showOverlayPreview} from './support/launch';
-import {expect,_electron as electron} from '@playwright/test';import {WebSocketServer} from 'ws';import {createServer} from 'node:http';import {once} from 'node:events';import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';import {join,resolve} from 'node:path';import {tmpdir} from 'node:os';
+import {expect,_electron as electron} from '@playwright/test';import {WebSocketServer} from 'ws';import {createServer} from 'node:http';import {once} from 'node:events';import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';import {join,resolve} from 'node:path';import {tmpdir} from 'node:os';
 const test=electronTest('parallel-answers.spec');
 test('并排回答独立生成，隐藏转写保留上下文，连续提问、切换、暂停及停止隔离',async()=>{
  const sockets:any[]=[];let calls=0;const server=new WebSocketServer({host:'127.0.0.1',port:0});await once(server,'listening');
@@ -39,5 +39,11 @@ test('并排回答独立生成，隐藏转写保留上下文，连续提问、�
   await page.evaluate(()=>(window as any).api.askAnswer({question:'手动问题'}));await expect.poll(()=>requests.length).toBe(before+1);expect(requests.at(-1).data.messages.at(-1).content).toBe('手动问题');await page.evaluate(()=>(window as any).api.cancelAnswer());
   await overlay.getByRole('button',{name:'显示转写',exact:true}).click();await expect(overlay.locator('.transcript-panel')).toContainText('停止之后');
   expect((await page.evaluate(()=>(window as any).api.getSettings())).showTranscripts).toBe(true);await page.evaluate(()=>(window as any).api.stopSession());
+  await expect.poll(async()=>{
+   const entries=(await readFile(join(dir,'data/logs/diagnostics.log'),'utf8')).trim().split('\n').map(line=>JSON.parse(line));
+   const starts=entries.filter(e=>e.event==='turn.dispatched');
+   return starts.some(f=>f.data.lane==='fast'&&starts.some(d=>d.data.lane==='deep'&&d.data.turnKey===f.data.turnKey&&d.data.requestKey!==f.data.requestKey));
+  }).toBe(true);
+  const log=await readFile(join(dir,'data/logs/diagnostics.log'),'utf8');expect(log).not.toContain('手动问题');expect(log).toContain('"event":"turn.settled"');
  }finally{await app.close();for(const e of sockets)e.socket.terminate();http.closeAllConnections();await Promise.all([new Promise<void>(r=>server.close(()=>r())),new Promise<void>(r=>http.close(()=>r()))]);await rm(dir,{recursive:true,force:true})}
 });

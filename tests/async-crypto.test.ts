@@ -15,3 +15,9 @@ test("only official async methods are used and legacy decrypted text is returned
   );
   expect(decryptStringAsync).toHaveBeenCalledOnce();
 });
+
+test('retries share a pending native initialization rather than accumulating native calls',async()=>{
+ const initialize=vi.fn(()=>new Promise<boolean>(()=>{}));
+ const engine=asyncCrypto({isAsyncEncryptionAvailable:initialize,encryptStringAsync:async x=>Buffer.from(x),decryptStringAsync:async()=>({result:'',shouldReEncrypt:false})});
+ engine.isEncryptionAvailable();engine.isEncryptionAvailable();expect(initialize).toHaveBeenCalledOnce();
+});

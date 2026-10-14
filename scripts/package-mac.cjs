@@ -81,6 +81,7 @@ async function packageMac(argv = [], dependencies = {}) {
   await build(process.execPath, args);
   const app = path.join(output, 'mac-arm64', config.productName + '.app');
   (dependencies.verify || verifyPackage)(app, manifest);
+  await (dependencies.smoke || require('./packaged-smoke.cjs').smokeApp)(app);
   console.log('Packaged app passed strict verification with the pinned signing identity');
   return app;
 }
