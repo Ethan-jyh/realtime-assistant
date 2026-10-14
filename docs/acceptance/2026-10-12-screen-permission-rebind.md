@@ -1,0 +1,9 @@
+# 屏幕开关已开但截图失败：授权迁移验收
+
+用户报错：answer.screenshot failed to get sources。当前程序为原安装路径0.2.2，固定证书和程序DR未改变。只读统一日志确认：kTCCServiceScreenCapture仍存旧临时签名的cdhash要求，无法匹配新的identifier+certificate root要求；当前进程请求返回authValue=0。系统设置开关可见开启不表示该旧身份绑定已迁移。
+
+用户明确授权本轮仅重置local.realtime.assistant的ScreenCapture记录，并先结束会话退出。tccutil按该范围执行成功，未重置麦克风、AudioCapture或其他应用。用户通过系统设置重新添加原路径程序并批准录屏，接受重启。未更新程序、证书或API配置。
+
+实际安装程序通过LaunchServices重启，停留准备页。临时本机Node诊断口在该真实程序内查询并执行desktopCapturer.getSources，避免Codex负责的临时Electron产生假授权结果。当前PID67243，before/after均granted；2块屏幕缩略图非空，尺寸128×72和111×72。只统计尺寸与成功标记，没有保存或上传图片。正常退出诊断实例后恢复普通启动。
+
+本次修复为旧临时签名到长期签名的一次屏幕授权重新绑定。后续打包继续使用同一证书和identifier，不应重新生成证书；OS政策仍可要求用户再批准，不能承诺永久无提示。

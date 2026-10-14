@@ -1,0 +1,20 @@
+{
+  "pid": 7780,
+  "version": "0.2.8",
+  "packaged": true,
+  "dockVisible": true,
+  "graveShortcutRegistered": true,
+  "screenPermission": "granted",
+  "windows": 1,
+  "modelKeyRetained": true,
+  "asrKeyRetained": true,
+  "opacity": 0.87,
+  "mouseThrough": false,
+  "minimizeButtons": 1,
+  "quitButtons": 1,
+  "sceneCards": 3,
+  "hasOldStartButton": false,
+  "codexSignedIn": true,
+  "codexModels": 7,
+  "defaultModel": "gpt-6.1-sol"
+}

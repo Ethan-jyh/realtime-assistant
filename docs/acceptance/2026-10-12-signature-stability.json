@@ -1,0 +1,26 @@
+{
+  "stableDesignatedRequirements": true,
+  "differentContentHashes": true,
+  "strictSignaturesVerified": true,
+  "keychainStateUnchanged": true,
+  "records": [
+    {
+      "app": "/Users/air/.codex/worktrees/realtime-assistant-plan/REA/release/mac-arm64/Realtime Assistant.app",
+      "designatedRequirement": "designated => identifier \"local.realtime.assistant\" and certificate root = H\"b23c85e0de8d24a7220abe37040a8e020ca38c70\"",
+      "cdhash": "5131b73c644b20b4fc72e8d07944176c30817c63",
+      "helpers": {
+        "option-modifier": "designated => identifier \"local.realtime.assistant.option-modifier\" and certificate root = H\"b23c85e0de8d24a7220abe37040a8e020ca38c70\"",
+        "system-audio": "designated => identifier \"local.realtime.assistant.system-audio\" and certificate root = H\"b23c85e0de8d24a7220abe37040a8e020ca38c70\""
+      }
+    },
+    {
+      "app": "/private/tmp/realtime-assistant-plan/signature-build-b/mac-arm64/Realtime Assistant.app",
+      "designatedRequirement": "designated => identifier \"local.realtime.assistant\" and certificate root = H\"b23c85e0de8d24a7220abe37040a8e020ca38c70\"",
+      "cdhash": "cce6310482fb0fde412f579981c6190bd1eb5034",
+      "helpers": {
+        "option-modifier": "designated => identifier \"local.realtime.assistant.option-modifier\" and certificate root = H\"b23c85e0de8d24a7220abe37040a8e020ca38c70\"",
+        "system-audio": "designated => identifier \"local.realtime.assistant.system-audio\" and certificate root = H\"b23c85e0de8d24a7220abe37040a8e020ca38c70\""
+      }
+    }
+  ]
+}

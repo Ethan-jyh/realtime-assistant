@@ -1,0 +1,3 @@
+import {test,expect} from 'vitest';import {RealtimeRecovery,recoverableRealtimeError} from '../src/main/runtime/realtime-recovery';
+test('同一个问题自动恢复最多三次，成功和新会话清除计数',()=>{const r=new RealtimeRecovery();expect([1,2,3,4].map(()=>r.allow(['a']))).toEqual([true,true,true,false]);r.completed(['a']);expect(r.allow(['a'])).toBe(true);r.clear();expect(r.allow(['a'])).toBe(true);expect(r.allow([])).toBe(false);});
+test('认证与未知错误不会被当成可自动重试的连接故障',()=>{expect(recoverableRealtimeError(Error('REALTIME_CONNECTION_CLOSED'))).toBe(true);expect(recoverableRealtimeError(Error('REALTIME_Authentication'))).toBe(false);expect(recoverableRealtimeError(Error('private-key'))).toBe(false);});

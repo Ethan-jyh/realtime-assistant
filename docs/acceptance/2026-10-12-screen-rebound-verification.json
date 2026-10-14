@@ -1,0 +1,27 @@
+{
+  "pid": 67243,
+  "version": "0.2.2",
+  "path": "/Users/air/Documents/ChatGPT/REA/Realtime Assistant .app/Contents/MacOS/Realtime Assistant",
+  "before": "granted",
+  "uploaded": false,
+  "screenshotSaved": false,
+  "screens": 2,
+  "images": [
+    {
+      "empty": false,
+      "size": {
+        "width": 128,
+        "height": 72
+      }
+    },
+    {
+      "empty": false,
+      "size": {
+        "width": 111,
+        "height": 72
+      }
+    }
+  ],
+  "ok": true,
+  "after": "granted"
+}

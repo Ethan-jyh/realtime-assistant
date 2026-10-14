@@ -1,0 +1,19 @@
+{
+  "identity": {
+    "version": "0.2.2",
+    "appPath": "/Users/air/Documents/ChatGPT/REA/Realtime Assistant .app/Contents/MacOS/Realtime Assistant",
+    "userData": "/Users/air/Library/Application Support/local-realtime-assistant",
+    "pid": 50310,
+    "visibleWindows": 1,
+    "screenPermission": "denied"
+  },
+  "ready": true,
+  "frames": 14,
+  "samples": 26880,
+  "peak": 0.030000001192092896,
+  "errorCode": null,
+  "durationMs": 719,
+  "microphone": false,
+  "uploaded": false,
+  "audioSaved": false
+}

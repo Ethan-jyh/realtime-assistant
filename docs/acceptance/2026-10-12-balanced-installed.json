@@ -1,0 +1,15 @@
+{
+  "pid": 44346,
+  "version": "0.2.6",
+  "packaged": true,
+  "dockVisible": true,
+  "graveShortcutRegistered": true,
+  "screenPermission": "granted",
+  "windows": 1,
+  "modelKeyRetained": true,
+  "asrKeyRetained": true,
+  "opacity": 0.87,
+  "mouseThrough": false,
+  "minimizeButtons": 1,
+  "quitButtons": 1
+}

@@ -1,0 +1,32 @@
+export const IPC_CHANNELS = {
+  CODEX_STATUS: 'codex.status',
+  DIAGNOSTICS: 'diagnostics.command',
+  TELEMETRY: 'diagnostics.telemetry',
+  SETTINGS_SAVE: 'settings.save',
+  PROFILES_LIST:'profiles.list',
+  PROFILES_SAVE:'profiles.save',
+  PROFILES_SELECT:'profiles.select',
+  SETTINGS_GET: 'settings.get',
+  PROVIDER_TEST: 'provider.test',
+  SESSION_START: 'session.start',
+  SESSION_STOP: 'session.stop',
+  SESSION_GET: 'session.get',
+  SESSION_UPDATE: 'session.update',
+  CAPTURE_PCM: 'capture.pcm',
+  CAPTURE_STATUS: 'capture.status',
+  SYSTEM_AUDIO: 'capture.system',
+  HISTORY_GET: 'history.get',
+  HISTORY_REVEAL: 'history.reveal',
+  HISTORY_AUDIO: 'history.audio',
+  ANSWER_ASK: 'answer.ask',
+  CAPTURE_QUESTION: 'answer.screenshot',
+  ANSWER_CANCEL: 'answer.cancel',
+  WINDOW_COMMAND: 'window.command',
+  HISTORY_LIST: 'history.list',
+  HISTORY_DELETE: 'history.delete',
+  HISTORY_EXPORT: 'history.export',
+  DOCUMENT_PICK: 'document.pick',
+  DOCUMENT_CONFIRM: 'document.confirm'
+} as const;
+
+export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];

@@ -1,0 +1,20 @@
+import React,{useEffect,useState} from 'react';
+import {PreparePage} from './Prepare';import {useWindowDrag} from '../hooks/useWindowDrag';
+export function ProfilesPage({onBack}:{onBack:()=>void}):React.JSX.Element{
+ const [display,setDisplay]=useState<any>({showTranscripts:true,deepProfileId:null});
+ const saveDisplay=async(patch:any)=>{try{await window.api.saveSettings(patch);setDisplay((s:any)=>({...s,...patch}));}catch(e:any){setError(e.message)}};
+ const dragRef=useWindowDrag('prepare');const [data,setData]=useState<any>({profiles:[],activeId:'',locked:false});const [editing,setEditing]=useState<any>(null);const [error,setError]=useState('');const [busy,setBusy]=useState(false);
+ const refresh=async()=>{try{setData(await window.api.listProfiles());setDisplay(await window.api.getSettings())}catch{setError('读取方案失败')}};
+ useEffect(()=>{void refresh();const off=window.api.onSessionState(()=>void refresh()),offDisplay=window.api.onDisplaySettings((s:any)=>setDisplay((prev:any)=>({...prev,...s})));return ()=>{off();offDisplay()}},[]);
+ const select=async(id:string)=>{setBusy(true);setError('');try{await window.api.selectProfile(id);await refresh()}catch(e:any){setError(e.message)}finally{setBusy(false)}};
+ if(editing)return <PreparePage initialProfile={editing} onBack={()=>{setEditing(null);void refresh()}}/>;
+ return <div ref={dragRef} className="shell settings-shell"><div className="glass">
+  <header className="titlebar"><span>设置</span><div className="controls"><button className="icon-btn" aria-label="最小化" onClick={()=>window.api.sendWindowCommand({action:'minimize_prepare'})}>−</button><button className="icon-btn" aria-label="完全退出" onClick={()=>window.api.sendWindowCommand({action:'quit_app'})}>×</button></div></header>
+  <main className="content profiles-content"><div className="profiles-heading"><div><span className="eyebrow">PROFILES</span><h2>回答方案</h2></div><button className="button primary" disabled={busy||data.locked} onClick={()=>setEditing({name:'',answerProvider:'api',model:{baseUrl:'https://api.deepseek.com/v1',modelName:'deepseek-flash'},asr:null})}>＋ 添加</button></div>
+   <section className="display-settings"><label className="setting-row"><span>显示转写</span><input type="checkbox" aria-label="显示转写" checked={display.showTranscripts!==false} onChange={e=>void saveDisplay({showTranscripts:e.target.checked})}/></label><label className="field"><span>深度模型</span><select aria-label="深度模型" value={display.deepProfileId??''} onChange={e=>void saveDisplay({deepProfileId:e.target.value||null})}><option value="">关闭</option>{data.profiles.filter((p:any)=>p.answerProvider!=='realtime').map((p:any)=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label></section>
+   <div className="profile-list">{data.profiles.map((p:any)=>{const active=p.id===data.activeId;return <article className={'provider-card'+(active?' selected':'')} key={p.id}><div className="provider-card-body"><span className="provider-symbol">{p.answerProvider==='realtime'?'≈':p.answerProvider==='codex'?'⌘':'↗'}</span><div><h3>{p.name}</h3><span className="status">{p.answerProvider==='realtime'?'实时语音':p.answerProvider==='codex'?'Codex':'文字回答'}</span></div></div><div className="provider-actions">{active?<span className="selected-badge">当前使用</span>:<button className="button" aria-label={'切换到 '+p.name} disabled={busy||data.locked||(p.answerProvider==='realtime'&&(!p.realtime?.workspaceId||!p.hasRealtimeKey))} onClick={()=>void select(p.id)}>切换</button>}<button className="icon-btn" aria-label={'编辑 '+p.name} disabled={busy||data.locked} onClick={()=>setEditing(p)}>编辑</button></div></article>})}</div>
+   {data.locked&&<p className="status">结束当前会话后可切换方案</p>}{error&&<p className="error" role="alert">{error}</p>}
+   <button className="button profiles-appearance" onClick={()=>setEditing({...data.profiles.find((p:any)=>p.id===data.activeId),appearanceOnly:true})}>窗口与日志</button>
+  </main><footer className="footer"><button className="button" onClick={onBack}>← 返回选择</button></footer>
+ </div></div>;
+}

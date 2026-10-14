@@ -1,0 +1,40 @@
+appId: local.realtime.assistant
+productName: 企业微信私有版
+asar: true
+afterPack: ./scripts/helper-icons.cjs
+electronDist: node_modules/electron/dist
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+  - '!**/*.map'
+extraResources:
+  - from: build/icon.icns
+    to: enterprise-private.icns
+  - from: build/option-modifier
+    to: option-modifier
+  - from: build/system-audio
+    to: system-audio
+  - from: build/tray-wecom.png
+    to: tray-wecom.png
+  - from: build/tray-wecom@2x.png
+    to: tray-wecom@2x.png
+  - from: build/icon.png
+    to: icon.png
+mac:
+  target:
+    - target: dir
+      arch: arm64
+  icon: build/icon.icns
+  identity: "-"
+  sign: ./scripts/sign-app.cjs
+  hardenedRuntime: false
+  extendInfo:
+    LSUIElement: true
+    CFBundleDisplayName: 企业微信私有版
+    CFBundleIconFile: enterprise-private.icns
+    NSMicrophoneUsageDescription: 只在开始音频会话或点击麦克风测试后采集麦克风，用于实时转写。
+    NSAudioCaptureUsageDescription: 只在你开始系统音频会话时采集扬声器声音，用于转写对方发言。
+    NSScreenCaptureUsageDescription: 只在你点击截图提问时读取屏幕，并发送给已配置的模型。
